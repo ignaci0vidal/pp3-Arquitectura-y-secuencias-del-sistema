@@ -27,8 +27,6 @@ El público objetivo comprende dos tipos de usuarios: **clientes** que quieren c
 Para los _clientes_, el beneficio es contar con un catálogo consultable y una confirmación inmediata del checkout.
 Para los _administradores_, es gestionar los datos desde una interfaz común.
 
-La versión documentada utiliza un frontend HTML, CSS y JavaScript, un backend Node.js con Express y una base SQLite; la separación en microservicios está iniciada con un gateway, pero aún no está integrada.
-
 ## 2. Diagrama de arquitectura
 
 ![Arquitectura propuesta](diagramas/arquitectura.png)
@@ -40,7 +38,7 @@ La versión documentada utiliza un frontend HTML, CSS y JavaScript, un backend N
 - **checkout**.
   Incluye _métodos_, _rutas_, _cuerpos_, _respuestas HTTP_ y a*lternativas*.
   El Gateway no tiene base e datos y cada API consulta exclusivamente su propia base.
-  Los motores y su distribución provienen del esquema aportado por el grupo.
+  #
 
 ```plantuml
 @startuml
@@ -410,9 +408,3 @@ Las respuestas de SQL y las acciones del usuario no son respuestas HTTP: describ
 - Gateway no tiene base ni acceso SQL.
 - No se introducen una pasarela de pago, un servicio de correo ni un cuarto servicio de dominio.
 - El diseño comprende **cuatro procesos backend** si se cuenta al Gateway: Gateway + Usuarios + Catálogo + Pedidos. Son **tres APIs de dominio y tres bases**.
-
-## 6. Estado de implementación y pendientes de entrega
-
-La arquitectura describe el objetivo del proyecto; el código revisado previamente sigue siendo el punto de partida de la migración. La separación de procesos y bases, las llamadas de orquestación, los contratos de stock, la creación integrada de pedidos/tickets y la recuperación de operaciones todavía deben implementarse o verificarse en una versión actualizada.
-
-Antes de entregar: confirmar los nombres definitivos de carpetas/servicios cuando se creen; confirmar alojamiento; completar integrante que sube y responsabilidades; verificar los nombres de integrantes. Conservar la etiqueta de arquitectura propuesta mientras el código no corresponda a este diseño.
