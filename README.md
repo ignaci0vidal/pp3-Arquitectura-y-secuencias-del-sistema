@@ -400,7 +400,7 @@ La propuesta usa `401` para token ausente, inválido o vencido, `403` para falta
 
 Las respuestas de SQL y las acciones del usuario no son respuestas HTTP: describen sus resultados sin inventar status codes.
 
-## 5. Correspondencia entre las tres piezas
+## Correspondencia entre las tres piezas
 
 - Login utiliza Frontend, Gateway, Usuarios y SQLite, todos presentes en la arquitectura.
 - Checkout utiliza Frontend, Gateway, Catálogo/PostgreSQL y Pedidos/MySQL, todos presentes en la arquitectura.
