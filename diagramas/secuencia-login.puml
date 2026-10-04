@@ -1,0 +1,49 @@
+@startuml
+title EcommerceApp2 - Inicio de sesión (diseño propuesto)
+autonumber
+actor "Cliente o administrador" as Usuario
+participant "Frontend Web" as Front
+participant "API Gateway" as Gateway
+participant "API Usuarios" as Users
+database "DB Usuarios\nSQLite" as DBUsers
+
+Usuario -> Front: Completar email y password
+Front -> Gateway: POST /api/auth/login\nContent-Type: application/json\nBody: {email, password}
+activate Gateway
+
+alt Email o password ausentes
+    Gateway --> Front: 400 Bad Request\n{message: "Email y password son obligatorios"}
+    Front --> Usuario: Mostrar campos obligatorios
+else Campos presentes
+    Gateway -> Users: POST /api/auth/login\nContent-Type: application/json\nBody: {email, password}
+    activate Users
+    Users -> DBUsers: SELECT usuario WHERE email = email recibido
+    DBUsers --> Users: Usuario con hash y rol, o sin resultados (SQL)
+
+    alt Usuario inexistente o contraseña incorrecta
+        note right of Users
+        Si el usuario existe, comparar
+        password con el hash usando bcrypt.
+        end note
+        Users --> Gateway: 401 Unauthorized\n{message: "Credenciales inválidas"}
+        Gateway --> Front: 401 Unauthorized\n{message: "Credenciales inválidas"}
+        Front --> Usuario: Mostrar error; mantener formulario
+    else Credenciales válidas
+        Users -> Users: Comparar contraseña con bcrypt\nFirmar JWT: {id, name, email, role, exp}
+        Users --> Gateway: 200 OK\n{token, user: {id, name, email, telefono, role}}
+        Gateway --> Front: 200 OK\n{token, user: {id, name, email, telefono, role}}
+        Front -> Front: Guardar token y datos de sesión
+        alt Rol admin
+            Front --> Usuario: Mostrar pantalla administrativa
+        else Rol client
+            Front --> Usuario: Mostrar inicio de la tienda
+        end
+    else Error interno de autenticación
+        Users --> Gateway: 500 Internal Server Error\n{message: "Error interno"}
+        Gateway --> Front: 500 Internal Server Error\n{message: "Error interno"}
+        Front --> Usuario: Mostrar error; permitir reintento
+    end
+    deactivate Users
+end
+deactivate Gateway
+@enduml

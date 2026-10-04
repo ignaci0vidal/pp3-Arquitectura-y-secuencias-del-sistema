@@ -1,0 +1,137 @@
+@startuml
+title EcommerceApp2 - Vista general de comunicaciones
+autonumber
+actor Usuario as u
+participant "Frontend Web" as f
+participant "API Gateway\nSin base de datos" as g
+participant "API Usuarios" as au
+participant "API Catálogo" as ac
+participant "API Pedidos" as ap
+database "DB Usuarios\nSQLite" as du
+database "DB Catálogo\nPostgreSQL" as dc
+database "DB Pedidos\nMySQL" as dp
+
+note over f,dp
+Diseño propuesto: tres escenarios independientes.
+Frontend -> Gateway -> APIs; cada API usa solo su base.
+Las solicitudes HTTP usan JSON; las consultas SQL no tienen status HTTP.
+end note
+
+group 1. Inicio de sesión
+    u -> f: Iniciar sesión
+    f -> g: POST /api/auth/login\nBody: {email, password}
+    activate g
+    alt Faltan campos obligatorios
+        g --> f: HTTP 400 Bad Request\n{message: "Email y password son obligatorios"}
+        f --> u: Mostrar error de validación
+    else Campos completos
+        g -> au: POST /api/auth/login\nBody: {email, password}
+        activate au
+        au -> du: SELECT usuario por email
+        du --> au: Usuario y hash de contraseña, o sin resultados
+        au -> au: Comparar contraseña con bcrypt
+        alt Credenciales válidas
+            au -> au: Generar JWT
+            au --> g: HTTP 200 OK\n{token, user}
+            g --> f: HTTP 200 OK\n{token, user}
+            f --> u: Mostrar sesión iniciada
+        else Credenciales inválidas
+            au --> g: HTTP 401 Unauthorized\n{message: "Credenciales inválidas"}
+            g --> f: HTTP 401 Unauthorized\n{message: "Credenciales inválidas"}
+            f --> u: Mostrar error de autenticación
+        end
+        deactivate au
+    end
+    deactivate g
+end
+
+group 2. Consultar un producto
+    u -> f: Seleccionar producto
+    f -> g: GET /api/productos/{id}
+    activate g
+    g -> ac: GET /api/productos/{id}
+    activate ac
+    ac -> dc: SELECT producto por id
+    dc --> ac: Producto o sin resultados
+    alt Producto encontrado
+        ac --> g: HTTP 200 OK\n{id, nombre, precio, stock, categoria}
+        g --> f: HTTP 200 OK\n{id, nombre, precio, stock, categoria}
+        f --> u: Mostrar detalle del producto
+    else Producto inexistente
+        ac --> g: HTTP 404 Not Found\n{message: "Producto no encontrado"}
+        g --> f: HTTP 404 Not Found\n{message: "Producto no encontrado"}
+        f --> u: Mostrar producto no encontrado
+    end
+    deactivate ac
+    deactivate g
+end
+
+group 3. Confirmar una compra sin cupón
+    u -> f: Confirmar compra
+    f -> g: POST /api/checkout\nAuthorization: Bearer {jwt}\nIdempotency-Key: operacionId\nBody: {carrito: [{id, quantity}], cupon_aplicado: null}
+    activate g
+    g -> g: Validar JWT y carrito
+    alt Token ausente, inválido o vencido
+        g --> f: HTTP 401 Unauthorized\n{message: "Autenticación requerida"}
+        f --> u: Solicitar inicio de sesión
+    else Carrito vacío o cantidades inválidas
+        g --> f: HTTP 400 Bad Request\n{message: "Carrito inválido"}
+        f --> u: Mostrar error de validación
+    else Token y carrito válidos
+        g -> ac: POST /api/stock/descontar\nAuthorization: Bearer {jwt}\nIdempotency-Key: operacionId\nBody: {items: [{productoId, cantidad}]}
+        activate ac
+        ac -> dc: BEGIN; consultar y bloquear productos\nValidar vigencia y stock
+        dc --> ac: Productos, precios y existencias
+        alt Producto inexistente o no disponible
+            ac -> dc: ROLLBACK
+            dc --> ac: Sin cambios
+            alt Producto inexistente
+                ac --> g: HTTP 404 Not Found\n{message: "Producto no encontrado"}
+                g --> f: HTTP 404 Not Found\n{message: "Producto no encontrado"}
+            else Producto no vigente o stock insuficiente
+                ac --> g: HTTP 409 Conflict\n{message: "Producto no disponible"}
+                g --> f: HTTP 409 Conflict\n{message: "Producto no disponible"}
+            end
+            f --> u: Mostrar error; conservar carrito
+        else Productos disponibles
+            ac -> dc: Descontar stock y registrar operacionId; COMMIT
+            dc --> ac: Descuento registrado
+            ac --> g: HTTP 200 OK\n{operacionId, items, total}
+            note over g,ap
+            items = [{productoId, nombre, cantidad, precioUnitario}]
+            Precios obtenidos de Catálogo; usuarioId obtenido del JWT.
+            end note
+            g -> ap: POST /api/pedidos\nAuthorization: Bearer {jwt}\nIdempotency-Key: operacionId\nBody: {operacionId, usuarioId, items, total}
+            activate ap
+            ap -> dp: BEGIN; INSERT Pedido, DetallePedido y Ticket
+            alt Pedido guardado
+                dp --> ap: Identificadores generados
+                ap -> dp: COMMIT
+                dp --> ap: Pedido confirmado
+                ap --> g: HTTP 201 Created\n{pedidoId, ticketId, estado: "confirmado", total}
+                g --> f: HTTP 201 Created\n{pedidoId, ticketId, estado: "confirmado", total}
+                f --> u: Mostrar confirmación y vaciar carrito local
+            else Falla confirmada al guardar el pedido
+                dp --> ap: Error de persistencia
+                ap -> dp: ROLLBACK
+                dp --> ap: Pedido no creado
+                ap --> g: HTTP 500 Internal Server Error\n{message: "No se pudo crear el pedido"}
+                g -> ac: POST /api/stock/reintegrar\nAuthorization: Bearer {jwt}\nBody: {operacionId}
+                ac -> dc: Reintegrar stock una sola vez por operacionId
+                dc --> ac: Resultado de la compensación
+                alt Reintegro confirmado
+                    ac --> g: HTTP 200 OK\n{operacionId, estado: "reintegrado"}
+                    g --> f: HTTP 500 Internal Server Error\n{message: "Compra no completada; stock reintegrado"}
+                else Reintegro no confirmado
+                    ac --> g: HTTP 503 Service Unavailable\n{operacionId, message: "Reintegro no confirmado"}
+                    g --> f: HTTP 503 Service Unavailable\n{operacionId, message: "Operación pendiente de recuperación"}
+                end
+                f --> u: Mostrar error; conservar carrito y operacionId
+            end
+            deactivate ap
+        end
+        deactivate ac
+    end
+    deactivate g
+end
+@enduml

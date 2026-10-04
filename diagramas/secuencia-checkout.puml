@@ -1,0 +1,88 @@
+@startuml
+title EcommerceApp2 - Checkout orquestado por Gateway (diseño propuesto)
+autonumber
+actor "Cliente autenticado" as Usuario
+participant "Frontend Web" as Front
+participant "API Gateway" as Gateway
+participant "API Catálogo" as Catalog
+database "DB Catálogo\nPostgreSQL" as DBCatalog
+participant "API Pedidos" as Orders
+database "DB Pedidos\nMySQL" as DBOrders
+
+note over Front,DBOrders
+Caso: carrito con productos, sin cupón.
+Los endpoints internos de stock son contratos propuestos.
+No interviene ninguna pasarela de pago.
+end note
+
+Usuario -> Front: Confirmar compra
+Front -> Gateway: POST /api/checkout\nAuthorization: Bearer token\nIdempotency-Key: operacionId\nBody: {carrito: [{id, quantity}], cupon_aplicado: null}
+activate Gateway
+Gateway -> Gateway: Verificar firma y vencimiento JWT\nObtener usuarioId del token; validar body
+
+alt Token ausente, inválido o vencido
+    Gateway --> Front: 401 Unauthorized\n{message: "Autenticación requerida"}
+    Front --> Usuario: Solicitar iniciar sesión; conservar carrito
+else Carrito vacío o cantidades inválidas
+    Gateway --> Front: 400 Bad Request\n{message: "Carrito inválido"}
+    Front --> Usuario: Mostrar error; conservar carrito
+else Token y body válidos
+    Gateway -> Catalog: POST /api/stock/descontar\nAuthorization: Bearer token\nIdempotency-Key: operacionId\nBody: {items: [{productoId: id, cantidad: quantity}]}
+    activate Catalog
+    Catalog -> Catalog: Validar token y contrato de la solicitud
+    Catalog -> DBCatalog: BEGIN; consultar productos, vigencia, precios y stock\nBloquear filas durante la validación
+    DBCatalog --> Catalog: Productos y existencias actuales (SQL)
+
+    alt Algún producto no existe
+        Catalog -> DBCatalog: ROLLBACK
+        DBCatalog --> Catalog: Sin cambios de stock (SQL)
+        Catalog --> Gateway: 404 Not Found\n{message: "Producto no encontrado", productoId}
+        Gateway --> Front: 404 Not Found\n{message, productoId}
+        Front --> Usuario: Indicar producto inexistente; conservar carrito
+    else Producto no vigente o stock insuficiente
+        Catalog -> DBCatalog: ROLLBACK
+        DBCatalog --> Catalog: Sin cambios de stock (SQL)
+        Catalog --> Gateway: 409 Conflict\n{message: "Producto no disponible", productoId}
+        Gateway --> Front: 409 Conflict\n{message, productoId}
+        Front --> Usuario: Mostrar disponibilidad; conservar carrito
+    else Todos los productos disponibles
+        Catalog -> DBCatalog: Descontar stock; registrar operacionId y cantidades\nGuardar resultado de la operación; COMMIT
+        DBCatalog --> Catalog: Descuento registrado (SQL)
+        Catalog --> Gateway: 200 OK\n{operacionId, items: [{productoId, nombre, cantidad, precioUnitario}], total}
+
+        Gateway -> Orders: POST /api/pedidos\nAuthorization: Bearer token\nIdempotency-Key: operacionId\nBody: {operacionId, usuarioId, items: [{productoId, nombre, cantidad, precioUnitario}], total}
+        activate Orders
+        Orders -> Orders: Validar token y solicitud del Gateway
+        Orders -> DBOrders: BEGIN; INSERT Pedido + DetallePedido + Ticket\nRegistrar operacionId único
+        alt Pedido y comprobante guardados
+            DBOrders --> Orders: Escrituras correctas; identificadores generados (SQL)
+            Orders -> DBOrders: COMMIT
+            DBOrders --> Orders: Pedido confirmado (SQL)
+            Orders --> Gateway: 201 Created\n{pedidoId, estado: "confirmado", total, ticketId}
+            Gateway --> Front: 201 Created\n{pedidoId, estado: "confirmado", total, ticketId}
+            Front -> Front: Vaciar carrito local
+            Front --> Usuario: Mostrar pedido y comprobante
+        else Falla confirmada al guardar el pedido
+            DBOrders --> Orders: Error de persistencia (SQL)
+            Orders -> DBOrders: ROLLBACK
+            DBOrders --> Orders: Pedido no creado (SQL)
+            Orders --> Gateway: 500 Internal Server Error\n{message: "No se pudo crear el pedido"}
+            Gateway -> Catalog: POST /api/stock/reintegrar\nAuthorization: Bearer token\nBody: {operacionId}
+            Catalog -> DBCatalog: BEGIN; recuperar descuento por operacionId\nReintegrar cantidades una sola vez; COMMIT
+            DBCatalog --> Catalog: Compensación registrada (SQL)
+            alt Reintegro confirmado
+                Catalog --> Gateway: 200 OK\n{operacionId, estado: "reintegrado"}
+                Gateway --> Front: 500 Internal Server Error\n{message: "Compra no completada; stock reintegrado"}
+                Front --> Usuario: Mostrar fallo; conservar carrito
+            else Reintegro no confirmado
+                Catalog --> Gateway: 503 Service Unavailable\n{operacionId, message: "Reintegro no confirmado"}
+                Gateway --> Front: 503 Service Unavailable\n{operacionId, message: "Operación pendiente de recuperación"}
+                Front --> Usuario: Conservar carrito y operacionId; consultar estado antes de reintentar
+            end
+        end
+        deactivate Orders
+    end
+    deactivate Catalog
+end
+deactivate Gateway
+@enduml
