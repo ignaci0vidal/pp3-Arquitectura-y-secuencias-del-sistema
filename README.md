@@ -31,7 +31,7 @@ Para los _administradores_, es gestionar los datos desde una interfaz común.
 
 ### Vista general del sistema
 
-![Sistema completo](diagramas/sistema-completo-simple.png)
+![Sistema completo](diagramas/sistema-completo-simple.png?v=2)
 
 ## 2. Diagrama de arquitectura
 
