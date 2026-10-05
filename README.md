@@ -6,8 +6,6 @@ Docente: Damián Wajser
 
 #
 
-#
-
 #### **Integrantes**
 
 - Lucía Corral
@@ -15,6 +13,10 @@ Docente: Damián Wajser
 - Carla Guisande
 - Ignacio Hernandez
 - Ignacio Vidal
+
+#
+
+#
 
 ## 1. De qué se trata el proyecto
 
