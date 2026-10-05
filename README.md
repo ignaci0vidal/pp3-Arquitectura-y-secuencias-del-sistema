@@ -29,6 +29,10 @@ El público objetivo comprende dos tipos de usuarios: **clientes** que quieren c
 Para los _clientes_, el beneficio es contar con un catálogo consultable y una confirmación inmediata del checkout.
 Para los _administradores_, es gestionar los datos desde una interfaz común.
 
+### Vista general del sistema
+
+![Sistema completo](diagramas/sistema-completo-simple.png)
+
 ## 2. Diagrama de arquitectura
 
 ![Arquitectura propuesta](diagramas/arquitectura.png)
