@@ -1,0 +1,33 @@
+@startuml
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
+autonumber
+title Usuarios — Crear sesión (contrato propuesto)
+actor "Cliente o administrador" as U
+participant "Frontend" as F
+participant "Gateway" as G
+participant "API Usuarios" as A
+database "SQLite" as D
+U -> F: Completar email y contraseña
+F -> G: POST /api/sesiones\nContent-Type: application/json\n{email, password}
+alt Campos obligatorios ausentes
+ G --> F: 400 Bad Request\n{message: "Campos obligatorios ausentes"}
+ F --> U: Mostrar error
+else Campos completos
+ G -> A: POST /api/sesiones\nContent-Type: application/json\n{email, password}
+ A -> D: SELECT id, email, password_hash, rol\nFROM usuarios WHERE email = :email;
+ D --> A: Una fila o ninguna
+ A -> A: Si existe usuario, comparar contraseña con bcrypt
+ alt Usuario inexistente o contraseña incorrecta
+  A --> G: 401 Unauthorized\n{message: "Credenciales inválidas"}
+  G --> F: 401 Unauthorized\n{message: "Credenciales inválidas"}
+  F --> U: Mostrar error
+ else Credenciales válidas
+  A -> A: Crear sesión autenticada y firmar JWT\n{sub: usuarioId, rol, exp}
+  A --> G: 201 Created\n{token, usuario: {id, email, rol}}
+  G --> F: 201 Created\n{token, usuario: {id, email, rol}}
+  F --> U: Mostrar pantalla correspondiente al rol
+ end
+end
+@enduml

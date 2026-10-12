@@ -1,0 +1,53 @@
+@startuml
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
+autonumber
+title Pedidos — Confirmar pedido pendiente (contrato propuesto)
+participant "Gateway" as G
+participant "API Catálogo" as C
+database "PostgreSQL" as DC
+participant "API Pedidos" as P
+database "MySQL" as DP
+note over G,DP
+Operación interna posterior a crear el pedido pendiente.
+Caso: un producto, sin cupón ni pago. El frontend aún no vacía el carrito.
+Gateway ya tiene pedidoId, usuarioId, productoId y cantidad del pedido.
+end note
+G -> C: POST /api/movimientos-stock\nAuthorization: Bearer jwt\nIdempotency-Key: pedidoId\n{pedidoId, productoId, cantidad, tipo: "venta"}
+C -> C: Validar identidad y permisos de la solicitud
+C -> DC: SELECT producto_id, cantidad, precio_unitario\nFROM movimientos_stock WHERE pedido_id = :pedidoId;
+DC --> C: Movimiento existente o ninguna fila
+alt Movimiento ya registrado y datos coincidentes
+ C --> G: 200 OK\n{pedidoId, productoId, cantidad, precioUnitario}
+else Primera solicitud
+ C -> DC: BEGIN;\nUPDATE productos SET stock = stock - :cantidad\nWHERE id = :productoId AND activo = TRUE\nAND stock >= :cantidad\nRETURNING id, precio;
+ DC --> C: Una fila actualizada o ninguna
+ alt Sin fila actualizada
+  C -> DC: COMMIT;
+  DC --> C: Sin cambios
+  C --> G: 409 Conflict\n{message: "Producto no disponible para el pedido"}
+ else Stock actualizado
+  C -> DC: INSERT INTO movimientos_stock\n(pedido_id, producto_id, cantidad, precio_unitario, tipo)\nVALUES (:pedidoId, :productoId, :cantidad, :precio, 'venta');\nCOMMIT;
+  DC --> C: Movimiento y stock confirmados en la misma transacción
+  C --> G: 201 Created\n{pedidoId, productoId, cantidad, precioUnitario}
+ end
+end
+alt Movimiento confirmado o reutilizado
+ G -> P: PATCH /api/pedidos/{pedidoId}\nAuthorization: Bearer jwt\n{estado: "confirmado", precioUnitario}
+ P -> P: Validar llamada interna autorizada\nCalcular total = cantidad persistida * precioUnitario
+ P -> DP: UPDATE pedidos p JOIN detalles_pedido d ON d.pedido_id = p.id\nSET p.estado = 'confirmado', p.total = d.cantidad * :precio,\nd.precio_unitario = :precio\nWHERE p.id = :pedidoId AND p.estado = 'pendiente';\nSELECT id, estado, total FROM pedidos WHERE id = :pedidoId;
+ DP --> P: Resultado de actualización y estado persistido
+ P --> G: 200 OK\n{pedidoId, estado: "confirmado", total}
+else Stock no disponible
+ G -> P: PATCH /api/pedidos/{pedidoId}\nAuthorization: Bearer jwt\n{estado: "rechazado"}
+ P -> DP: UPDATE pedidos SET estado = 'rechazado'\nWHERE id = :pedidoId AND estado = 'pendiente';\nSELECT id, estado FROM pedidos WHERE id = :pedidoId;
+ DP --> P: Resultado de actualización y estado persistido
+ P --> G: 200 OK\n{pedidoId, estado: "rechazado"}
+end
+note over G,DP
+Si una respuesta se pierde o Pedidos no confirma, no se declara éxito.
+El pedido sigue pendiente de conciliación. Reintentar usa el mismo pedidoId.
+No se representa una reversión conjunta de PostgreSQL y MySQL.
+end note
+@enduml

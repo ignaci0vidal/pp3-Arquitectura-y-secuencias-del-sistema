@@ -29,388 +29,336 @@ El público objetivo comprende dos tipos de usuarios: **clientes** que quieren c
 Para los _clientes_, el beneficio es contar con un catálogo consultable y una confirmación inmediata del checkout.
 Para los _administradores_, es gestionar los datos desde una interfaz común.
 
+## 2. Arquitectura propuesta y despliegue previsto
+
+El sistema dispone de un frontend para la tienda y el dashboard administrativo. Las solicitudes del frontend ingresan por un API Gateway, que se comunica con las APIs de Usuarios, Catálogo y Pedidos. Cada API administra su propia base de datos.
+
+**El alojamiento indicado es previsto; este documento no certifica que los componentes ya estén desplegados. Los nombres de carpetas son propuestos y deben verificarse contra el repositorio de implementación.**
+
+| Componente                       | Carpeta propuesta          | Tecnología             | Despliegue previsto |
+| -------------------------------- | -------------------------- | ---------------------- | ------------------- |
+| Frontend Web: tienda y dashboard | `frontend/`                | HTML, CSS y JavaScript | Vercel              |
+| API Gateway                      | `api-gateway/`             | Node.js y Express      | Render              |
+| API Usuarios                     | `ms-usuarios/`             | Node.js y Express      | Render              |
+| API Catálogo                     | `ms-catalogo/`             | Node.js y Express      | Render              |
+| API Pedidos                      | `ms-pedidos/`              | Node.js y Express      | Render              |
+| DB Usuarios                      | Base exclusiva de Usuarios | MongoDB                | MongoDB Atlas       |
+| DB Catálogo                      | Base exclusiva de Catálogo | PostgreSQL             | Render Postgres     |
+| DB Pedidos                       | Base exclusiva de Pedidos  | MySQL                  | Railway             |
+
 ### Vista general del sistema
 
-![Sistema completo](diagramas/sistema-completo-simple.png?v=2)
+![Sistema completo](diagramas/diagArq.jpg?v=2)
 
-## 2. Diagrama de arquitectura
+[Ver imagen de arquitectura en tamaño completo](diagramas/diagArq.jpg)
 
-![Arquitectura propuesta](diagramas/arquitectura.png)
+## Responsabilidades y comunicación
 
-**Vista general en formato de secuencia:** Reúne los participantes del sistema y muestra tres escenarios independientes:
+**Estado del documento:** diseño propuesto. Las rutas, tablas y columnas que siguen requieren acuerdo del equipo y adaptación del código; no se presentan como una implementación verificada.
 
-- **login**
-- **consulta de producto**
-- **checkout**.
-  Incluye _métodos_, _rutas_, _cuerpos_, _respuestas HTTP_ y a*lternativas*.
-  El Gateway no tiene base e datos y cada API consulta exclusivamente su propia base.
-  #
+| Componente   | Responsabilidad                                                       | Base propia               |
+| ------------ | --------------------------------------------------------------------- | ------------------------- |
+| Frontend Web | Tienda y dashboard administrativo; consume únicamente el Gateway.     | .                         |
+| API Gateway  | Valida JWT, enruta solicitudes y coordina la confirmación de pedidos. | .                         |
+| API Usuarios | Usuarios, roles y autenticación.                                      | MongoDB en MongoDB Atlas. |
+| API Catálogo | Productos, precios, existencias y movimientos de stock.               | PostgreSQL.               |
+| API Pedidos  | Pedido, sus detalles y estado.                                        | MySQL.                    |
+
+Cada API accede únicamente a su base. El Gateway no ejecuta SQL. Las solicitudes HTTP incluyen método, ruta y datos; las solicitudes a PostgreSQL y MySQL muestran SQL parametrizado; las consultas a MongoDB muestran operaciones del driver. Las respuestas de las bases muestran resultados, sin códigos HTTP.
+
+La arquitectura general se documenta aparte, con componentes, alojamientos previstos y comunicaciones, sin endpoints. No se utiliza un diagrama de secuencia como sustituto de la arquitectura.
+
+---
+
+## 3. Diagramas de secuencia
+
+Cada diagrama representa una operación independiente y reinicia su numeración. Las imágenes PNG muestran los diagramas renderizados. Cada una incluye un enlace para abrirla en tamaño completo. Los bloques PlantUML permiten mantener sus fuentes; GitHub no renderiza esos bloques automáticamente. No se reúnen autenticación, consulta de productos y compra dentro de una vista general.
+
+### 1 — Crear sesión
+
+Este diagrama muestra únicamente la autenticación de un cliente o administrador. El frontend envía las credenciales al Gateway y API Usuarios busca el usuario en MongoDB Atlas. La contraseña se verifica antes de crear la sesión y emitir el JWT. Se distinguen los casos de campos ausentes, credenciales inválidas y autenticación correcta.
+
+**Contrato propuesto:** POST /api/sesiones crea una sesión autenticada: 201 en el caso nuevo; 400 si faltan campos y 401 si las credenciales no son válidas.
+
+[Ver este diagrama en tamaño completo](diagramas/01-sesion.png)
+
+![1 — Crear sesión](diagramas/01-sesion.png)
+
+<details>
+<summary>Ver código PlantUML de este diagrama</summary>
 
 ```plantuml
 @startuml
-title EcommerceApp2 - Vista general de comunicaciones
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
 autonumber
-actor Usuario as u
-participant "Frontend Web" as f
-participant "API Gateway\nSin base de datos" as g
-participant "API Usuarios" as au
-participant "API Catálogo" as ac
-participant "API Pedidos" as ap
-database "DB Usuarios\nSQLite" as du
-database "DB Catálogo\nPostgreSQL" as dc
-database "DB Pedidos\nMySQL" as dp
-
-note over f,dp
-Diseño propuesto: tres escenarios independientes.
-Frontend -> Gateway -> APIs; cada API usa solo su base.
-Las solicitudes HTTP usan JSON; las consultas SQL no tienen status HTTP.
-end note
-
-group 1. Inicio de sesión
-    u -> f: Iniciar sesión
-    f -> g: POST /api/auth/login\nBody: {email, password}
-    activate g
-    alt Faltan campos obligatorios
-        g --> f: HTTP 400 Bad Request\n{message: "Email y password son obligatorios"}
-        f --> u: Mostrar error de validación
-    else Campos completos
-        g -> au: POST /api/auth/login\nBody: {email, password}
-        activate au
-        au -> du: SELECT usuario por email
-        du --> au: Usuario y hash de contraseña, o sin resultados
-        au -> au: Comparar contraseña con bcrypt
-        alt Credenciales válidas
-            au -> au: Generar JWT
-            au --> g: HTTP 200 OK\n{token, user}
-            g --> f: HTTP 200 OK\n{token, user}
-            f --> u: Mostrar sesión iniciada
-        else Credenciales inválidas
-            au --> g: HTTP 401 Unauthorized\n{message: "Credenciales inválidas"}
-            g --> f: HTTP 401 Unauthorized\n{message: "Credenciales inválidas"}
-            f --> u: Mostrar error de autenticación
-        end
-        deactivate au
-    end
-    deactivate g
-end
-
-group 2. Consultar un producto
-    u -> f: Seleccionar producto
-    f -> g: GET /api/productos/{id}
-    activate g
-    g -> ac: GET /api/productos/{id}
-    activate ac
-    ac -> dc: SELECT producto por id
-    dc --> ac: Producto o sin resultados
-    alt Producto encontrado
-        ac --> g: HTTP 200 OK\n{id, nombre, precio, stock, categoria}
-        g --> f: HTTP 200 OK\n{id, nombre, precio, stock, categoria}
-        f --> u: Mostrar detalle del producto
-    else Producto inexistente
-        ac --> g: HTTP 404 Not Found\n{message: "Producto no encontrado"}
-        g --> f: HTTP 404 Not Found\n{message: "Producto no encontrado"}
-        f --> u: Mostrar producto no encontrado
-    end
-    deactivate ac
-    deactivate g
-end
-
-group 3. Confirmar una compra sin cupón
-    u -> f: Confirmar compra
-    f -> g: POST /api/checkout\nAuthorization: Bearer {jwt}\nIdempotency-Key: operacionId\nBody: {carrito: [{id, quantity}], cupon_aplicado: null}
-    activate g
-    g -> g: Validar JWT y carrito
-    alt Token ausente, inválido o vencido
-        g --> f: HTTP 401 Unauthorized\n{message: "Autenticación requerida"}
-        f --> u: Solicitar inicio de sesión
-    else Carrito vacío o cantidades inválidas
-        g --> f: HTTP 400 Bad Request\n{message: "Carrito inválido"}
-        f --> u: Mostrar error de validación
-    else Token y carrito válidos
-        g -> ac: POST /api/stock/descontar\nAuthorization: Bearer {jwt}\nIdempotency-Key: operacionId\nBody: {items: [{productoId, cantidad}]}
-        activate ac
-        ac -> dc: BEGIN; consultar y bloquear productos\nValidar vigencia y stock
-        dc --> ac: Productos, precios y existencias
-        alt Producto inexistente o no disponible
-            ac -> dc: ROLLBACK
-            dc --> ac: Sin cambios
-            alt Producto inexistente
-                ac --> g: HTTP 404 Not Found\n{message: "Producto no encontrado"}
-                g --> f: HTTP 404 Not Found\n{message: "Producto no encontrado"}
-            else Producto no vigente o stock insuficiente
-                ac --> g: HTTP 409 Conflict\n{message: "Producto no disponible"}
-                g --> f: HTTP 409 Conflict\n{message: "Producto no disponible"}
-            end
-            f --> u: Mostrar error; conservar carrito
-        else Productos disponibles
-            ac -> dc: Descontar stock y registrar operacionId; COMMIT
-            dc --> ac: Descuento registrado
-            ac --> g: HTTP 200 OK\n{operacionId, items, total}
-            note over g,ap
-            items = [{productoId, nombre, cantidad, precioUnitario}]
-            Precios obtenidos de Catálogo; usuarioId obtenido del JWT.
-            end note
-            g -> ap: POST /api/pedidos\nAuthorization: Bearer {jwt}\nIdempotency-Key: operacionId\nBody: {operacionId, usuarioId, items, total}
-            activate ap
-            ap -> dp: BEGIN; INSERT Pedido, DetallePedido y Ticket
-            alt Pedido guardado
-                dp --> ap: Identificadores generados
-                ap -> dp: COMMIT
-                dp --> ap: Pedido confirmado
-                ap --> g: HTTP 201 Created\n{pedidoId, ticketId, estado: "confirmado", total}
-                g --> f: HTTP 201 Created\n{pedidoId, ticketId, estado: "confirmado", total}
-                f --> u: Mostrar confirmación y vaciar carrito local
-            else Falla confirmada al guardar el pedido
-                dp --> ap: Error de persistencia
-                ap -> dp: ROLLBACK
-                dp --> ap: Pedido no creado
-                ap --> g: HTTP 500 Internal Server Error\n{message: "No se pudo crear el pedido"}
-                g -> ac: POST /api/stock/reintegrar\nAuthorization: Bearer {jwt}\nBody: {operacionId}
-                ac -> dc: Reintegrar stock una sola vez por operacionId
-                dc --> ac: Resultado de la compensación
-                alt Reintegro confirmado
-                    ac --> g: HTTP 200 OK\n{operacionId, estado: "reintegrado"}
-                    g --> f: HTTP 500 Internal Server Error\n{message: "Compra no completada; stock reintegrado"}
-                else Reintegro no confirmado
-                    ac --> g: HTTP 503 Service Unavailable\n{operacionId, message: "Reintegro no confirmado"}
-                    g --> f: HTTP 503 Service Unavailable\n{operacionId, message: "Operación pendiente de recuperación"}
-                end
-                f --> u: Mostrar error; conservar carrito y operacionId
-            end
-            deactivate ap
-        end
-        deactivate ac
-    end
-    deactivate g
+title Usuarios — Crear sesión (contrato propuesto)
+actor "Cliente o administrador" as U
+participant "Frontend" as F
+participant "Gateway" as G
+participant "API Usuarios" as A
+database "MongoDB Atlas" as D
+U -> F: Completar email y contraseña
+F -> G: POST /api/sesiones\nContent-Type: application/json\n{email, password}
+alt Campos obligatorios ausentes
+ G --> F: 400 Bad Request\n{message: "Campos obligatorios ausentes"}
+ F --> U: Mostrar error
+else Campos completos
+ G -> A: POST /api/sesiones\nContent-Type: application/json\n{email, password}
+ A -> D: usuarios.findOne({email: emailRecibido},\n{projection: {_id: 1, email: 1, passwordHash: 1, rol: 1}})
+ D --> A: Documento del usuario o null
+ A -> A: Si existe usuario, comparar contraseña con bcrypt
+ alt Usuario inexistente o contraseña incorrecta
+  A --> G: 401 Unauthorized\n{message: "Credenciales inválidas"}
+  G --> F: 401 Unauthorized\n{message: "Credenciales inválidas"}
+  F --> U: Mostrar error
+ else Credenciales válidas
+  A -> A: Crear sesión autenticada y firmar JWT\n{sub: usuarioId, rol, exp}
+  A --> G: 201 Created\n{token, usuario: {id, email, rol}}
+  G --> F: 201 Created\n{token, usuario: {id, email, rol}}
+  F --> U: Mostrar pantalla correspondiente al rol
+ end
 end
 @enduml
 ```
 
-### Responsabilidades
+</details>
 
-| Componente   | Responsabilidad                                                                                        | Base de datos                                                           |
-| ------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| Frontend Web | Interfaz común para clientes y administradores; envía solicitudes al Gateway.                          | Ninguna base del servidor; puede utilizar almacenamiento del navegador. |
-| API Gateway  | Punto de entrada, validación JWT, enrutamiento, composición de respuestas y coordinación del checkout. | **Ninguna.**                                                            |
-| API Usuarios | Registro, login, usuarios, clientes y persistencia de carritos.                                        | SQLite exclusiva de Usuarios.                                           |
-| API Catálogo | Productos, categorías, stock, precios y cupones.                                                       | PostgreSQL exclusiva de Catálogo.                                       |
-| API Pedidos  | Pedidos, detalles, tickets y reglas del dominio de checkout/pedidos.                                   | MySQL exclusiva de Pedidos.                                             |
+<br>
 
-El módulo Checkout de API Pedidos conserva las reglas para crear y registrar pedidos. La **orquestación entre APIs** se concentra en el Gateway: este obtiene la información autorizada del Catálogo y solicita la creación del pedido a API Pedidos.
+---
 
-### Reglas de comunicación
+<br>
 
-- El frontend consume únicamente la API del Gateway.
-- El Gateway llama a las tres APIs mediante HTTP(S), con contratos REST y cuerpos JSON. No realiza consultas SQL.
-- Cada API accede solo a su propia base. Ningún servicio lee directamente las tablas de otro.
-- Para este diseño, la comunicación de negocio entre dominios se coordina desde el Gateway; no se proponen llamadas directas Usuarios → Catálogo, Catálogo → Pedidos ni Pedidos → Usuarios.
-- API Usuarios emite los JWT. Gateway verifica firma y vencimiento; los servicios también validan las peticiones sensibles que reciben.
-- CORS se configura para el origen del frontend en el Gateway. CORS no reemplaza autenticación ni restricciones de acceso a los servicios.
-- SQLite es un archivo local del servicio Usuarios, no un servidor de base de datos separado. Se representa como una base propia por su responsabilidad y aislamiento.
-- Por el formato solicitado, esta vista general muestra participantes, líneas de vida y mensajes HTTP. Las dos secuencias específicas desarrollan login y checkout. Las ubicaciones propuestas de despliegue se conservan en la tabla y el apartado de alojamiento.
+### 2 — Consultar producto
 
-## 3. Diagrama de secuencia
+Este diagrama muestra únicamente la consulta del detalle de un producto. El frontend solicita el producto por su identificador; Gateway deriva la solicitud a API Catálogo, que consulta PostgreSQL. La respuesta permite mostrar el detalle o informar que el producto no se encuentra.
 
-#### 1 — Inicio de sesión
+**Contrato propuesto:** GET /api/productos/{id}: 200 si existe y está activo; 404 si no se encuentra.
 
-![Secuencia de inicio de sesión](diagramas/secuencia-login.png)
+[Ver este diagrama en tamaño completo](diagramas/02-producto.png)
 
-**Objetivo:** autenticar a un cliente o administrador y devolver un JWT a través del Gateway.
+![2 — Consultar producto](diagramas/02-producto.png)
 
-**Participantes:** usuario, Frontend Web, API Gateway, API Usuarios y DB Usuarios (SQLite). El Gateway no consulta la base: reenvía la solicitud a Usuarios.
+<details>
+<summary>Ver código PlantUML de este diagrama</summary>
 
 ```plantuml
 @startuml
-title EcommerceApp2 - Inicio de sesión (diseño propuesto)
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
 autonumber
-actor "Cliente o administrador" as Usuario
-participant "Frontend Web" as Front
-participant "API Gateway" as Gateway
-participant "API Usuarios" as Users
-database "DB Usuarios\nSQLite" as DBUsers
-
-Usuario -> Front: Completar email y password
-Front -> Gateway: POST /api/auth/login\nContent-Type: application/json\nBody: {email, password}
-activate Gateway
-
-alt Email o password ausentes
-    Gateway --> Front: 400 Bad Request\n{message: "Email y password son obligatorios"}
-    Front --> Usuario: Mostrar campos obligatorios
-else Campos presentes
-    Gateway -> Users: POST /api/auth/login\nContent-Type: application/json\nBody: {email, password}
-    activate Users
-    Users -> DBUsers: SELECT usuario WHERE email = email recibido
-    DBUsers --> Users: Usuario con hash y rol, o sin resultados (SQL)
-
-    alt Usuario inexistente o contraseña incorrecta
-        note right of Users
-        Si el usuario existe, comparar
-        password con el hash usando bcrypt.
-        end note
-        Users --> Gateway: 401 Unauthorized\n{message: "Credenciales inválidas"}
-        Gateway --> Front: 401 Unauthorized\n{message: "Credenciales inválidas"}
-        Front --> Usuario: Mostrar error; mantener formulario
-    else Credenciales válidas
-        Users -> Users: Comparar contraseña con bcrypt\nFirmar JWT: {id, name, email, role, exp}
-        Users --> Gateway: 200 OK\n{token, user: {id, name, email, telefono, role}}
-        Gateway --> Front: 200 OK\n{token, user: {id, name, email, telefono, role}}
-        Front -> Front: Guardar token y datos de sesión
-        alt Rol admin
-            Front --> Usuario: Mostrar pantalla administrativa
-        else Rol client
-            Front --> Usuario: Mostrar inicio de la tienda
-        end
-    else Error interno de autenticación
-        Users --> Gateway: 500 Internal Server Error\n{message: "Error interno"}
-        Gateway --> Front: 500 Internal Server Error\n{message: "Error interno"}
-        Front --> Usuario: Mostrar error; permitir reintento
-    end
-    deactivate Users
+title Catálogo — Consultar producto (contrato propuesto)
+actor Cliente as U
+participant "Frontend" as F
+participant "Gateway" as G
+participant "API Catálogo" as A
+database "PostgreSQL" as D
+U -> F: Seleccionar producto
+F -> G: GET /api/productos/{id}
+G -> A: GET /api/productos/{id}
+A -> D: SELECT id, nombre, descripcion, precio, stock, categoria_id\nFROM productos WHERE id = :id AND activo = TRUE;
+D --> A: Una fila o ninguna
+alt Producto disponible en el catálogo
+ A --> G: 200 OK\n{id, nombre, descripcion, precio, stock, categoriaId}
+ G --> F: 200 OK\n{id, nombre, descripcion, precio, stock, categoriaId}
+ F --> U: Mostrar detalle
+else Producto inexistente o inactivo
+ A --> G: 404 Not Found\n{message: "Producto no encontrado"}
+ G --> F: 404 Not Found\n{message: "Producto no encontrado"}
+ F --> U: Mostrar producto no encontrado
 end
-deactivate Gateway
 @enduml
 ```
 
-**Contrato propuesto:**
+</details>
 
-- `POST /api/auth/login` existe como ruta en el backend base y se conserva en la separación.
-- El body contiene `email` y `password`; las contraseñas almacenadas se comparan mediante bcrypt.
-- API Usuarios emite el token. No se agrega una base al Gateway para autenticar.
-- Respuestas: `200` para login correcto, `400` para campos obligatorios ausentes, `401` para credenciales inválidas y `500` para error interno.
-- La carga posterior de archivos de la pantalla destino queda fuera del caso de autenticación.
-- Una caída de conexión al servicio se traduce a `503 Service Unavailable` en el Gateway, sin establecer una sesión.
+<br>
 
-#### 2 — Confirmar compra mediante el Gateway
+---
 
-![Secuencia de checkout](diagramas/secuencia-checkout.png)
+<br>
 
-**Objetivo:** comprobar productos y stock en API Catálogo y crear Pedido, DetallePedido y Ticket en API Pedidos. El Gateway coordina ambos servicios.
+### 3 — Crear pedido pendiente
 
-**Caso seleccionado:** cliente autenticado, carrito enviado por el frontend y compra sin cupón. La existencia del módulo Cupón en Catálogo no obliga a aplicar uno en todas las compras.
+Este diagrama muestra únicamente la creación de un pedido pendiente. El cliente envía el detalle del pedido y API Pedidos lo registra en MySQL junto con sus artículos. En esta operación todavía no se descuenta stock ni se declara la compra confirmada. El ejemplo está acotado a un producto y contempla la reutilización de un pedido existente para evitar duplicaciones.
+
+**Contrato propuesto:** POST /api/pedidos: 201 si crea un pedido pendiente; 200 si reutiliza uno existente con la misma clave y solicitud; 400 si el detalle no es válido y 401 si falla la autenticación.
+
+[Ver este diagrama en tamaño completo](diagramas/03-pedido.png)
+
+![3 — Crear pedido pendiente](diagramas/03-pedido.png)
+
+<details>
+<summary>Ver código PlantUML de este diagrama</summary>
 
 ```plantuml
 @startuml
-title EcommerceApp2 - Checkout orquestado por Gateway (diseño propuesto)
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
 autonumber
-actor "Cliente autenticado" as Usuario
-participant "Frontend Web" as Front
-participant "API Gateway" as Gateway
-participant "API Catálogo" as Catalog
-database "DB Catálogo\nPostgreSQL" as DBCatalog
-participant "API Pedidos" as Orders
-database "DB Pedidos\nMySQL" as DBOrders
-
-note over Front,DBOrders
-Caso: carrito con productos, sin cupón.
-Los endpoints internos de stock son contratos propuestos.
-No interviene ninguna pasarela de pago.
+title Pedidos — Crear pedido pendiente (contrato propuesto)
+actor Cliente as U
+participant "Frontend" as F
+participant "Gateway" as G
+participant "API Pedidos" as A
+database "MySQL" as D
+note over F,D
+Ejemplo acotado a un producto. Crear el pedido todavía no confirma la compra.
+La cantidad pertenece al detalle del pedido; no es un endpoint.
 end note
-
-Usuario -> Front: Confirmar compra
-Front -> Gateway: POST /api/checkout\nAuthorization: Bearer token\nIdempotency-Key: operacionId\nBody: {carrito: [{id, quantity}], cupon_aplicado: null}
-activate Gateway
-Gateway -> Gateway: Verificar firma y vencimiento JWT\nObtener usuarioId del token; validar body
-
+U -> F: Solicitar pedido
+F -> G: POST /api/pedidos\nAuthorization: Bearer jwt\nIdempotency-Key: intentoId\n{items: [{productoId, cantidad}]}
+G -> G: Verificar JWT y estructura del body
 alt Token ausente, inválido o vencido
-    Gateway --> Front: 401 Unauthorized\n{message: "Autenticación requerida"}
-    Front --> Usuario: Solicitar iniciar sesión; conservar carrito
-else Carrito vacío o cantidades inválidas
-    Gateway --> Front: 400 Bad Request\n{message: "Carrito inválido"}
-    Front --> Usuario: Mostrar error; conservar carrito
-else Token y body válidos
-    Gateway -> Catalog: POST /api/stock/descontar\nAuthorization: Bearer token\nIdempotency-Key: operacionId\nBody: {items: [{productoId: id, cantidad: quantity}]}
-    activate Catalog
-    Catalog -> Catalog: Validar token y contrato de la solicitud
-    Catalog -> DBCatalog: BEGIN; consultar productos, vigencia, precios y stock\nBloquear filas durante la validación
-    DBCatalog --> Catalog: Productos y existencias actuales (SQL)
-
-    alt Algún producto no existe
-        Catalog -> DBCatalog: ROLLBACK
-        DBCatalog --> Catalog: Sin cambios de stock (SQL)
-        Catalog --> Gateway: 404 Not Found\n{message: "Producto no encontrado", productoId}
-        Gateway --> Front: 404 Not Found\n{message, productoId}
-        Front --> Usuario: Indicar producto inexistente; conservar carrito
-    else Producto no vigente o stock insuficiente
-        Catalog -> DBCatalog: ROLLBACK
-        DBCatalog --> Catalog: Sin cambios de stock (SQL)
-        Catalog --> Gateway: 409 Conflict\n{message: "Producto no disponible", productoId}
-        Gateway --> Front: 409 Conflict\n{message, productoId}
-        Front --> Usuario: Mostrar disponibilidad; conservar carrito
-    else Todos los productos disponibles
-        Catalog -> DBCatalog: Descontar stock; registrar operacionId y cantidades\nGuardar resultado de la operación; COMMIT
-        DBCatalog --> Catalog: Descuento registrado (SQL)
-        Catalog --> Gateway: 200 OK\n{operacionId, items: [{productoId, nombre, cantidad, precioUnitario}], total}
-
-        Gateway -> Orders: POST /api/pedidos\nAuthorization: Bearer token\nIdempotency-Key: operacionId\nBody: {operacionId, usuarioId, items: [{productoId, nombre, cantidad, precioUnitario}], total}
-        activate Orders
-        Orders -> Orders: Validar token y solicitud del Gateway
-        Orders -> DBOrders: BEGIN; INSERT Pedido + DetallePedido + Ticket\nRegistrar operacionId único
-        alt Pedido y comprobante guardados
-            DBOrders --> Orders: Escrituras correctas; identificadores generados (SQL)
-            Orders -> DBOrders: COMMIT
-            DBOrders --> Orders: Pedido confirmado (SQL)
-            Orders --> Gateway: 201 Created\n{pedidoId, estado: "confirmado", total, ticketId}
-            Gateway --> Front: 201 Created\n{pedidoId, estado: "confirmado", total, ticketId}
-            Front -> Front: Vaciar carrito local
-            Front --> Usuario: Mostrar pedido y comprobante
-        else Falla confirmada al guardar el pedido
-            DBOrders --> Orders: Error de persistencia (SQL)
-            Orders -> DBOrders: ROLLBACK
-            DBOrders --> Orders: Pedido no creado (SQL)
-            Orders --> Gateway: 500 Internal Server Error\n{message: "No se pudo crear el pedido"}
-            Gateway -> Catalog: POST /api/stock/reintegrar\nAuthorization: Bearer token\nBody: {operacionId}
-            Catalog -> DBCatalog: BEGIN; recuperar descuento por operacionId\nReintegrar cantidades una sola vez; COMMIT
-            DBCatalog --> Catalog: Compensación registrada (SQL)
-            alt Reintegro confirmado
-                Catalog --> Gateway: 200 OK\n{operacionId, estado: "reintegrado"}
-                Gateway --> Front: 500 Internal Server Error\n{message: "Compra no completada; stock reintegrado"}
-                Front --> Usuario: Mostrar fallo; conservar carrito
-            else Reintegro no confirmado
-                Catalog --> Gateway: 503 Service Unavailable\n{operacionId, message: "Reintegro no confirmado"}
-                Gateway --> Front: 503 Service Unavailable\n{operacionId, message: "Operación pendiente de recuperación"}
-                Front --> Usuario: Conservar carrito y operacionId; consultar estado antes de reintentar
-            end
-        end
-        deactivate Orders
-    end
-    deactivate Catalog
+ G --> F: 401 Unauthorized\n{message: "Autenticación requerida"}
+ F --> U: Solicitar inicio de sesión
+else Solicitud incompleta o cantidad no positiva
+ G --> F: 400 Bad Request\n{message: "Detalle de pedido inválido"}
+ F --> U: Mostrar error
+else Solicitud válida
+ G -> A: POST /api/pedidos\nAuthorization: Bearer jwt\nIdempotency-Key: intentoId\n{items: [{productoId, cantidad}]}
+ A -> A: Validar JWT; obtener usuarioId del token
+ A -> D: SELECT id, estado FROM pedidos\nWHERE intento_id = :intentoId AND usuario_id = :usuarioId;
+ D --> A: Pedido existente o ninguna fila
+ alt Pedido existente y solicitud coincidente
+  A --> G: 200 OK\n{pedidoId, estado}
+  G --> F: 200 OK\n{pedidoId, estado}
+  F --> U: Mostrar estado del pedido existente
+ else Nuevo intento
+ A -> D: START TRANSACTION;\nINSERT INTO pedidos (usuario_id, intento_id, estado)\nVALUES (:usuarioId, :intentoId, 'pendiente');
+ D --> A: pedidoId generado
+ A -> D: INSERT INTO detalles_pedido (pedido_id, producto_id, cantidad)\nVALUES (:pedidoId, :productoId, :cantidad);\nCOMMIT;
+ D --> A: Transacción confirmada
+ A --> G: 201 Created\n{pedidoId, estado: "pendiente"}
+ G --> F: 201 Created\n{pedidoId, estado: "pendiente"}
+ F --> U: Mostrar pedido pendiente de confirmación
+ end
 end
-deactivate Gateway
+note over A,D
+Los dos INSERT son una transacción local: si falla, no se guarda el pedido parcial.
+Todavía no se modificó stock. Precio y total quedan pendientes.
+end note
 @enduml
 ```
 
-### Contratos internos propuestos
+</details>
 
-| Origen → destino   | Solicitud                    | Datos                                                                                                                         | Respuesta                                                                         |
-| ------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Frontend → Gateway | `POST /api/checkout`         | Bearer token, Idempotency-Key; `carrito: [{id, quantity}]`, `cupon_aplicado: null`                                            | `201` con pedido y comprobante, o error del flujo.                                |
-| Gateway → Catálogo | `POST /api/stock/descontar`  | Bearer token, Idempotency-Key; `items: [{productoId, cantidad}]`                                                              | `200` con precios e items; `404` si falta producto; `409` si no está disponible.  |
-| Gateway → Pedidos  | `POST /api/pedidos`          | Bearer token, Idempotency-Key; `operacionId`, `usuarioId`, `items: [{productoId, nombre, cantidad, precioUnitario}]`, `total` | `201` con `pedidoId`, estado, total y `ticketId`; `500` si falla la persistencia. |
-| Gateway → Catálogo | `POST /api/stock/reintegrar` | Bearer token; `operacionId`                                                                                                   | `200` si se compensa; `503` si no se confirma la recuperación.                    |
+<br>
 
-Estas rutas de stock y sus contratos son **decisiones propuestas de diseño**, pendientes de implementación y acuerdo del equipo. Aunque la ruta `POST /api/pedidos` ya existe en el backend base, su contrato separado, transacción y vínculo con el checkout requieren adaptación.
+---
 
-### Consistencia entre servicios
+<br>
 
-Cada API utiliza una transacción local sobre su base. No existe un único `COMMIT` que abarque simultáneamente PostgreSQL y MySQL. Si Catálogo descuenta stock y Pedidos confirma que no pudo crear el pedido, Gateway solicita una operación compensatoria para devolver las unidades.
+### 4 — Confirmar o rechazar el pedido
 
-`operacionId` identifica el mismo intento de compra en ambas APIs. Catálogo guarda el descuento y el reintegro; Pedidos guarda una referencia única al intento. Los reintentos con la misma clave deben reutilizar el resultado y comprobar que el contenido sea el mismo, sin duplicar pedidos ni descontar stock dos veces. Esa información durable pertenece a las APIs, **no a una base del Gateway**.
+Este diagrama muestra únicamente la confirmación de un pedido previamente creado. Gateway coordina el movimiento de stock en API Catálogo y la actualización del estado en API Pedidos. Si el producto no está disponible, se propone rechazar el pedido. Si una respuesta se pierde o la confirmación falla después de modificar stock, la operación requiere conciliación; no se declara una compra exitosa.
 
-Si se corta la conexión y no se sabe si Pedidos llegó a confirmar, **no se debe reintegrar stock inmediatamente ni crear otro pedido con una clave distinta**. Primero se consulta el resultado por `operacionId` mediante un contrato de recuperación a implementar. Un mecanismo durable de conciliación en los servicios también es necesario para recuperar operaciones si el Gateway se reinicia. El diagrama muestra el caso de falla confirmada y compensación; no declara resueltos los fallos de red de resultado incierto.
+**Contrato propuesto:** POST /api/movimientos-stock: 201 para el nuevo movimiento, 200 para un resultado existente coincidente y 409 cuando no se puede atender el pedido. PATCH /api/pedidos/{pedidoId}: 200 cuando se actualiza o se recupera el estado confirmado.
 
-El caso vacía el carrito local del navegador. La limpieza del carrito persistido en API Usuarios es una operación adicional que deberá coordinarse si el equipo incorpora su recuperación al flujo de compra; no se afirma aquí que ambos carritos se sincronicen automáticamente.
+[Ver este diagrama en tamaño completo](diagramas/04-confirmacion.png)
 
-### Códigos de estado y autenticación
+![4 — Confirmar o rechazar el pedido](diagramas/04-confirmacion.png)
 
-La propuesta usa `401` para token ausente, inválido o vencido, `403` para falta de permisos y `201` cuando se crea el pedido. Es una decisión del contrato objetivo. El backend base revisado tenía `403` para token inválido/vencido y `200` en checkout, por lo que no debe presentarse como código ya adaptado.
+<details>
+<summary>Ver código PlantUML de este diagrama</summary>
 
-Las respuestas de SQL y las acciones del usuario no son respuestas HTTP: describen sus resultados sin inventar status codes.
+```plantuml
+@startuml
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
+autonumber
+title Pedidos — Confirmar pedido pendiente (contrato propuesto)
+participant "Gateway" as G
+participant "API Catálogo" as C
+database "PostgreSQL" as DC
+participant "API Pedidos" as P
+database "MySQL" as DP
+note over G,DP
+Operación interna posterior a crear el pedido pendiente.
+Caso: un producto, sin cupón ni pago. El frontend aún no vacía el carrito.
+Gateway ya tiene pedidoId, usuarioId, productoId y cantidad del pedido.
+end note
+G -> C: POST /api/movimientos-stock\nAuthorization: Bearer jwt\nIdempotency-Key: pedidoId\n{pedidoId, productoId, cantidad, tipo: "venta"}
+C -> C: Validar identidad y permisos de la solicitud
+C -> DC: SELECT producto_id, cantidad, precio_unitario\nFROM movimientos_stock WHERE pedido_id = :pedidoId;
+DC --> C: Movimiento existente o ninguna fila
+alt Movimiento ya registrado y datos coincidentes
+ C --> G: 200 OK\n{pedidoId, productoId, cantidad, precioUnitario}
+else Primera solicitud
+ C -> DC: BEGIN;\nUPDATE productos SET stock = stock - :cantidad\nWHERE id = :productoId AND activo = TRUE\nAND stock >= :cantidad\nRETURNING id, precio;
+ DC --> C: Una fila actualizada o ninguna
+ alt Sin fila actualizada
+  C -> DC: COMMIT;
+  DC --> C: Sin cambios
+  C --> G: 409 Conflict\n{message: "Producto no disponible para el pedido"}
+ else Stock actualizado
+  C -> DC: INSERT INTO movimientos_stock\n(pedido_id, producto_id, cantidad, precio_unitario, tipo)\nVALUES (:pedidoId, :productoId, :cantidad, :precio, 'venta');\nCOMMIT;
+  DC --> C: Movimiento y stock confirmados en la misma transacción
+  C --> G: 201 Created\n{pedidoId, productoId, cantidad, precioUnitario}
+ end
+end
+alt Movimiento confirmado o reutilizado
+ G -> P: PATCH /api/pedidos/{pedidoId}\nAuthorization: Bearer jwt\n{estado: "confirmado", precioUnitario}
+ P -> P: Validar llamada interna autorizada\nCalcular total = cantidad persistida * precioUnitario
+ P -> DP: UPDATE pedidos p JOIN detalles_pedido d ON d.pedido_id = p.id\nSET p.estado = 'confirmado', p.total = d.cantidad * :precio,\nd.precio_unitario = :precio\nWHERE p.id = :pedidoId AND p.estado = 'pendiente';\nSELECT id, estado, total FROM pedidos WHERE id = :pedidoId;
+ DP --> P: Resultado de actualización y estado persistido
+ P --> G: 200 OK\n{pedidoId, estado: "confirmado", total}
+else Stock no disponible
+ G -> P: PATCH /api/pedidos/{pedidoId}\nAuthorization: Bearer jwt\n{estado: "rechazado"}
+ P -> DP: UPDATE pedidos SET estado = 'rechazado'\nWHERE id = :pedidoId AND estado = 'pendiente';\nSELECT id, estado FROM pedidos WHERE id = :pedidoId;
+ DP --> P: Resultado de actualización y estado persistido
+ P --> G: 200 OK\n{pedidoId, estado: "rechazado"}
+end
+note over G,DP
+Si una respuesta se pierde o Pedidos no confirma, no se declara éxito.
+El pedido sigue pendiente de conciliación. Reintentar usa el mismo pedidoId.
+No se representa una reversión conjunta de PostgreSQL y MySQL.
+end note
+@enduml
+```
 
-## Correspondencia entre las tres piezas
+</details>
 
-- Login utiliza Frontend, Gateway, Usuarios y SQLite, todos presentes en la arquitectura.
-- Checkout utiliza Frontend, Gateway, Catálogo/PostgreSQL y Pedidos/MySQL, todos presentes en la arquitectura.
-- En ambos casos el frontend se comunica solo con Gateway.
-- Gateway no tiene base ni acceso SQL.
-- No se introducen una pasarela de pago, un servicio de correo ni un cuarto servicio de dominio.
-- El diseño comprende **cuatro procesos backend** si se cuenta al Gateway: Gateway + Usuarios + Catálogo + Pedidos. Son **tres APIs de dominio y tres bases**.
+<br>
+
+---
+
+<br>
+
+### Contratos propuestos
+
+| Origen → destino              | Solicitud                       | Resultado principal                                          |
+| ----------------------------- | ------------------------------- | ------------------------------------------------------------ |
+| Frontend → Gateway → Usuarios | `POST /api/sesiones`            | `201 Created`, token y usuario autenticado.                  |
+| Frontend → Gateway → Catálogo | `GET /api/productos/{id}`       | `200 OK`, detalle del producto.                              |
+| Frontend → Gateway → Pedidos  | `POST /api/pedidos`             | `201 Created`, pedido pendiente.                             |
+| Gateway → Catálogo            | `POST /api/movimientos-stock`   | `201 Created`, movimiento registrado con precio de Catálogo. |
+| Gateway → Pedidos             | `PATCH /api/pedidos/{pedidoId}` | `200 OK`, estado persistido del pedido.                      |
+
+Las rutas identifican recursos mediante sustantivos. Crear un movimiento de stock es distinto de usar una ruta con un verbo como `/descontar`. No se incluye una ruta de pagos porque estos diagramas no registran pagos.
+
+### Alcance y consistencia
+
+- La creación del pedido y su detalle se realiza dentro de una transacción local en MySQL. Si falla, no debe persistir un pedido parcial. En esta etapa no se modificó el stock.
+- Catálogo registra el movimiento y modifica el stock dentro de una misma transacción local en PostgreSQL.
+- La cantidad es un campo del detalle, no una ruta. Los ejemplos de pedidos incluyen un solo producto; el caso de varios productos requiere una transacción de inventario para el conjunto completo.
+- La idempotencia requiere restricciones únicas, comparación del contenido y manejo de solicitudes simultáneas. Un SELECT previo por sí solo no evita duplicaciones. La misma clave con contenido diferente debe rechazarse con `409 Conflict`.
+- Gateway debe consultar el estado durable del pedido antes de continuar o reintentar la confirmación. Un pedido confirmado o rechazado no vuelve a procesarse como un pedido nuevo.
+- Si stock quedó aplicado y la confirmación del pedido no se completa, el pedido permanece pendiente de conciliación. El reintento debe recuperar el movimiento existente y continuar, sin volver a descontar unidades.
+- Esa conciliación debe implementarse de manera durable en los servicios, incluida la recuperación después de reinicios. No queda resuelta únicamente por dibujar los mensajes HTTP.
+- Los ejemplos muestran validaciones y errores de negocio. Los fallos de persistencia y red necesitan tratamiento adicional y nunca deben producir una confirmación falsa.
+- Eliminar la compensación anterior del diagrama no elimina las transacciones locales: una transacción local fallida debe cancelarse. No existe una única transacción que abarque ambas bases.
+- Pedidos obtiene la identidad del JWT. Solo llamadas internas autorizadas pueden establecer precios y cambiar el estado a confirmado o rechazado. El precio procede de Catálogo y el total se calcula en el servidor.
+- El frontend muestra la compra confirmada y vacía el carrito únicamente al conocer el estado confirmado. La respuesta `201` de un pedido pendiente no alcanza. La limpieza de un carrito persistido en Usuarios requiere coordinación adicional.
+- Los pagos, cupones y comprobantes tendrán sus propios diagramas cuando se definan sus contratos. No se afirma que hayan sido eliminados del alcance del proyecto.
+
+### Correspondencia con la arquitectura
+
+Usuarios utiliza MongoDB Atlas; Catálogo utiliza PostgreSQL; Pedidos utiliza MySQL. El frontend consume únicamente Gateway y ninguna API consulta directamente la base de otra.
+
+El sistema comprende cuatro procesos backend contando el Gateway: Gateway, Usuarios, Catálogo y Pedidos. Son tres APIs de dominio y tres bases propias. Los alojamientos previstos se mantienen en la sección de despliegue.

@@ -1,0 +1,48 @@
+@startuml
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
+autonumber
+title Pedidos — Crear pedido pendiente (contrato propuesto)
+actor Cliente as U
+participant "Frontend" as F
+participant "Gateway" as G
+participant "API Pedidos" as A
+database "MySQL" as D
+note over F,D
+Ejemplo acotado a un producto. Crear el pedido todavía no confirma la compra.
+La cantidad pertenece al detalle del pedido; no es un endpoint.
+end note
+U -> F: Solicitar pedido
+F -> G: POST /api/pedidos\nAuthorization: Bearer jwt\nIdempotency-Key: intentoId\n{items: [{productoId, cantidad}]}
+G -> G: Verificar JWT y estructura del body
+alt Token ausente, inválido o vencido
+ G --> F: 401 Unauthorized\n{message: "Autenticación requerida"}
+ F --> U: Solicitar inicio de sesión
+else Solicitud incompleta o cantidad no positiva
+ G --> F: 400 Bad Request\n{message: "Detalle de pedido inválido"}
+ F --> U: Mostrar error
+else Solicitud válida
+ G -> A: POST /api/pedidos\nAuthorization: Bearer jwt\nIdempotency-Key: intentoId\n{items: [{productoId, cantidad}]}
+ A -> A: Validar JWT; obtener usuarioId del token
+ A -> D: SELECT id, estado FROM pedidos\nWHERE intento_id = :intentoId AND usuario_id = :usuarioId;
+ D --> A: Pedido existente o ninguna fila
+ alt Pedido existente y solicitud coincidente
+  A --> G: 200 OK\n{pedidoId, estado}
+  G --> F: 200 OK\n{pedidoId, estado}
+  F --> U: Mostrar estado del pedido existente
+ else Nuevo intento
+ A -> D: START TRANSACTION;\nINSERT INTO pedidos (usuario_id, intento_id, estado)\nVALUES (:usuarioId, :intentoId, 'pendiente');
+ D --> A: pedidoId generado
+ A -> D: INSERT INTO detalles_pedido (pedido_id, producto_id, cantidad)\nVALUES (:pedidoId, :productoId, :cantidad);\nCOMMIT;
+ D --> A: Transacción confirmada
+ A --> G: 201 Created\n{pedidoId, estado: "pendiente"}
+ G --> F: 201 Created\n{pedidoId, estado: "pendiente"}
+ F --> U: Mostrar pedido pendiente de confirmación
+ end
+end
+note over A,D
+Los dos INSERT son una transacción local: si falla, no se guarda el pedido parcial.
+Todavía no se modificó stock. Precio y total quedan pendientes.
+end note
+@enduml

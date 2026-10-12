@@ -1,0 +1,26 @@
+@startuml
+skinparam defaultFontName SansSerif
+skinparam shadowing false
+skinparam maxMessageSize 300
+autonumber
+title Catálogo — Consultar producto (contrato propuesto)
+actor Cliente as U
+participant "Frontend" as F
+participant "Gateway" as G
+participant "API Catálogo" as A
+database "PostgreSQL" as D
+U -> F: Seleccionar producto
+F -> G: GET /api/productos/{id}
+G -> A: GET /api/productos/{id}
+A -> D: SELECT id, nombre, descripcion, precio, stock, categoria_id\nFROM productos WHERE id = :id AND activo = TRUE;
+D --> A: Una fila o ninguna
+alt Producto disponible en el catálogo
+ A --> G: 200 OK\n{id, nombre, descripcion, precio, stock, categoriaId}
+ G --> F: 200 OK\n{id, nombre, descripcion, precio, stock, categoriaId}
+ F --> U: Mostrar detalle
+else Producto inexistente o inactivo
+ A --> G: 404 Not Found\n{message: "Producto no encontrado"}
+ G --> F: 404 Not Found\n{message: "Producto no encontrado"}
+ F --> U: Mostrar producto no encontrado
+end
+@enduml
