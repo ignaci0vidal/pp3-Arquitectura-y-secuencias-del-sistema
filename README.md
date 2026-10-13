@@ -20,14 +20,37 @@ Docente: Damián Wajser
 
 ## 1. De qué se trata el proyecto
 
-**Tienda Online** es una aplicación web de comercio electrónico dirigida a pequeños comercios que venden productos de tecnología y artículos para el hogar. Permite que sus clientes consulten el catálogo, busquen por nombre, filtren por categoría, agreguen productos al carrito y confirmen una compra. Los usuarios pueden registrarse e iniciar sesión, mientras que el personal autorizado dispone de una dashboard administrativo para gestionar el stock de productos y alta y baja de productos y de usuarios.
+**EcommerceApp2** es una propuesta de aplicación web dirigida a pequeños comercios de cercanía que venden productos de tecnología y artículos para el hogar. Se busca ofrecerles un canal de consulta y recepción de pedidos, acompañado de herramientas para administrar productos, precios, stock y pedidos.
 
-El problema que busca resolver es la dispersión de la información de venta: cuando un comercio recibe consultas por mensajes y mantiene precios y existencias en listas separadas, el cliente necesita consultar qué está disponible y el personal debe revisar los datos para cada operación. La aplicación reúne el catálogo, los precios y el stock en una misma plataforma; durante el checkout, el servidor verifica la disponibilidad y calcula el total a partir de los precios guardados en la base de datos.
+### Problema propuesto
 
-El público objetivo comprende dos tipos de usuarios: **clientes** que quieren consultar productos y preparar sus compras desde un navegador, y **administradores** que necesitan mantener la información del comercio.
+Se plantea como problema a investigar la dificultad de organizar pedidos cuando un comercio recibe consultas por mensajes y mantiene su catálogo, precios y existencias en registros separados. En ese contexto, el personal podría necesitar verificar manualmente la disponibilidad y responder preguntas repetidas antes de registrar cada pedido. Para el cliente, esto podría implicar demoras y dificultades para conocer los productos disponibles.
 
-Para los _clientes_, el beneficio es contar con un catálogo consultable y una confirmación inmediata del checkout.
-Para los _administradores_, es gestionar los datos desde una interfaz común.
+Esta situación constituye un supuesto inicial del proyecto y deberá contrastarse con experiencias reales de los comercios seleccionados.
+
+### Hipótesis inicial
+
+Los pequeños comercios de cercanía que gestionan consultas y pedidos mediante mensajes podrían beneficiarse de una plataforma que reúna el catálogo, la disponibilidad y el registro de pedidos.
+
+### Hipótesis específica
+
+En comercios que reciben pedidos por WhatsApp y registran sus existencias manualmente, un catálogo web actualizado y un proceso organizado de generación de pedidos podrían reducir el tiempo de atención por pedido y los errores relacionados con la disponibilidad de productos.
+
+Esta hipótesis se evaluará comparando el proceso habitual con el uso de un prototipo, considerando el tiempo de atención, las consultas necesarias para completar un pedido y los errores de disponibilidad.
+
+## Solución propuesta
+
+La aplicación permitirá que los clientes consulten el catálogo, busquen y filtren productos, revisen su disponibilidad y seleccionen artículos mediante un carrito para generar un pedido. El personal autorizado contará con un dashboard para administrar productos, precios, existencias y consultar los pedidos recibidos.
+
+El beneficio esperado es facilitar la consulta autónoma de productos y organizar la información necesaria para atender pedidos. La propuesta no presupone un aumento de ventas: ese resultado requeriría una evaluación posterior.
+
+#### Investigación y validación
+
+Se prevé realizar entrevistas a comerciantes y clientes, analizar las alternativas disponibles y probar el prototipo con potenciales usuarios. Las entrevistas buscarán conocer cómo se gestionan actualmente los pedidos, qué dificultades ocurren y qué condiciones facilitarían o impedirían adoptar la aplicación.
+
+Los datos estadísticos utilizados deberán indicar su fuente, fecha y alcance. Los resultados de entrevistas y pruebas se documentarán una vez realizadas, diferenciándolos de los supuestos iniciales.
+
+Finalmente, se contrastará la idea de negocio original con los resultados obtenidos para determinar si la propuesta responde a una necesidad real, si requiere ajustes en sus funcionalidades o si debe revisarse el público objetivo.
 
 ## 2. Arquitectura propuesta y despliegue previsto
 
@@ -46,7 +69,7 @@ El sistema dispone de un frontend para la tienda y el dashboard administrativo. 
 | DB Catálogo                      | Base exclusiva de Catálogo | PostgreSQL             | Render Postgres     |
 | DB Pedidos                       | Base exclusiva de Pedidos  | MySQL                  | Railway             |
 
-### Vista general del sistema
+#### Vista general del sistema
 
 ![Sistema completo](diagramas/diagArq.jpg?v=2)
 
